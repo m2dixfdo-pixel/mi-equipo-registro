@@ -38,6 +38,8 @@ with st.sidebar:
         avance = st.slider("% Avance Real", 0, 100)
         comentarios = st.text_area("Detalle de avances")
         
+   # Reemplaza la parte del "if st.form_submit_button" por esta:
+
         if st.form_submit_button("Guardar"):
             esp = calcular_esperado(f_ini, f_fin)
             nueva_fila = pd.DataFrame([{
@@ -50,6 +52,17 @@ with st.sidebar:
                 "Avance_Real": avance,
                 "Avance_Esperado": esp,
                 "Comentarios_Avance": comentarios
+            }])
+            
+            # Intentamos escribir usando la conexión directa
+            try:
+                # Esta es la forma alternativa de escribir que pide menos permisos
+                conn.create(data=nueva_fila) 
+                st.success("✅ ¡Registro guardado! Revisa tu Google Sheet.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error de permisos de Google: Asegúrate de que el enlace en 'Secrets' sea el de 'Compartir' con permiso de EDITOR.")
+                st.info("Si el error persiste, es porque Google exige 'Service Account' para escribir.")
             }])
             
             # Unir datos nuevos con los viejos
