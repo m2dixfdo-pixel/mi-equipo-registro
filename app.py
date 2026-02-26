@@ -1,17 +1,17 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-from datetime import date, datetime
+from datetime import date
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Adelaida - Gestión de Equipo", layout="wide")
 
-# Función para inicializar datos (Simulando base de datos)
-if 'db_avances' not in st.session_state:
-    # Datos iniciales para que la gráfica no se vea vacía
-    st.session_state.db_avances = pd.DataFrame(columns=[
-        "Fecha_Reporte", "Tarea", "Responsable", "Horas_Semanales", "Avance_Real", "Avance_Esperado"
-    ])
+# Conexión con Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Leer datos existentes
+df = conn.read(ttl="0") # ttl="0" para que siempre lea el dato más fresco
 
 # --- LÓGICA DE NEGOCIO ---
 def calcular_esperado(inicio, fin):
@@ -20,63 +20,47 @@ def calcular_esperado(inicio, fin):
     if hoy > fin: return 100
     total_dias = (fin - inicio).days
     dias_transcurridos = (hoy - inicio).days
-    return round((dias_transcurridos / total_dias) * 100, 2)
+    return round((max(0, dias_transcurridos) / max(1, total_dias)) * 100, 2)
 
 # --- INTERFAZ ---
-st.title("📊 Control de Proyectos y Seguimiento Histórico")
-st.markdown("---")
+st.title("🚀 Sistema de Gestión Permanente")
+st.info("Los datos se guardan automáticamente en tu Google Sheet.")
 
-# Barra lateral para entrada de datos
 with st.sidebar:
-    st.header("📝 Registrar Avance Semanal")
-    with st.form("registro_semanal"):
-        nombre_tarea = st.selectbox("Tarea", ["Desarrollo Backend", "Seguridad IAM", "Interfaz de Usuario", "Documentación"])
-        responsable = st.text_input("Nombre del Responsable")
-        fecha_ini = st.date_input("Fecha Inicio Tarea", date(2024, 1, 1))
-        fecha_fin = st.date_input("Fecha Entrega Final", date(2024, 12, 31))
+    st.header("📝 Nuevo Registro")
+    with st.form("registro_form"):
+        tarea = st.selectbox("Tarea", ["Desarrollo Backend", "Seguridad IAM", "Interfaz UI", "Documentación"])
+        resp = st.text_input("Responsable")
+        f_ini = st.date_input("Inicio", date(2024, 1, 1))
+        f_fin = st.date_input("Fin", date(2024, 12, 31))
+        horas = st.number_input("Horas Semanales", min_value=0.0)
+        avance = st.slider("% Avance Real", 0, 100)
         
-        st.divider()
-        horas = st.number_input("Horas dedicadas esta semana", min_value=0.0, step=0.5)
-        avance_r = st.slider("% Avance Real Actual", 0, 100, 10)
-        
-        boton = st.form_submit_button("Guardar en Historial")
-        
-        if boton:
-            esp = calcular_esperado(fecha_ini, fecha_fin)
-            nuevo_dato = {
-                "Fecha_Reporte": date.today(),
-                "Tarea": nombre_tarea,
-                "Responsable": responsable,
+        if st.form_submit_button("Guardar"):
+            esp = calcular_esperado(f_ini, f_fin)
+            # Crear nueva fila
+            nueva_fila = pd.DataFrame([{
+                "Fecha_Reporte": str(date.today()),
+                "Tarea": tarea,
+                "Responsable": resp,
                 "Horas_Semanales": horas,
-                "Avance_Real": avance_r,
+                "Avance_Real": avance,
                 "Avance_Esperado": esp
-            }
-            st.session_state.db_avances = pd.concat([st.session_state.db_avances, pd.DataFrame([nuevo_dato])], ignore_index=True)
-            st.success("✅ ¡Registro añadido al histórico!")
+            }])
+            # Concatenar y actualizar Google Sheets
+            updated_df = pd.concat([df, nueva_fila], ignore_index=True)
+            conn.update(data=updated_df)
+            st.success("¡Datos guardados en la nube!")
+            st.rerun()
 
-# --- VISUALIZACIÓN ---
-col1, col2 = st.columns([1, 1])
+# --- DASHBOARD ---
+if not df.empty:
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = px.line(df, x="Fecha_Reporte", y=["Avance_Real", "Avance_Esperado"], 
+                      color="Tarea", title="Histórico de Avances")
+        st.plotly_chart(fig)
+    with col2:
+        st.subheader("Datos en Tiempo Real")
+        st.dataframe(df)
 
-with col1:
-    st.subheader("📈 Evolución del Proyecto")
-    if not st.session_state.db_avances.empty:
-        # Gráfica comparativa Real vs Esperado
-        fig = px.line(st.session_state.db_avances, 
-                     x="Fecha_Reporte", 
-                     y=["Avance_Real", "Avance_Esperado"],
-                     color="Tarea",
-                     markers=True,
-                     title="Progreso Real vs. Planificado")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Aún no hay datos. Registra el primer avance en la barra lateral.")
-
-with col2:
-    st.subheader("🕒 Resumen de Dedicación")
-    if not st.session_state.db_avances.empty:
-        fig_bar = px.bar(st.session_state.db_avances, x="Tarea", y="Horas_Semanales", color="Responsable", title="Horas por Tarea")
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-st.markdown("---")
-st.subheader("📋 Datos Históricos (Sustituto de Excel)")
-st.dataframe(st.session_state.db_avances, use_container_width=True)
